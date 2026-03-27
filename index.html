@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twitter Clone</title>
+    <link rel="stylesheet" href="/pub/client.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Navigation -->
+        <header>
+            <div class="logo">
+                <h1>Twitter Clone</h1>
+            </div>
+            <nav id="navbar">
+                <!-- Les boutons seront affichés/masqués par JS -->
+                <button id="navLoginBtn" class="nav-btn">Se connecter</button>
+                <button id="navSigninBtn" class="nav-btn btn-secondary">Créer un compte</button>
+                <span id="navUsername" class="nav-text hidden"></span>
+                <button id="navPostBtn" class="nav-btn btn-primary hidden">Nouveau message</button>
+                <button id="navLogoutBtn" class="nav-btn hidden">Se déconnecter</button>
+            </nav>
+        </header>
+
+        <!-- Zone pour les messages Flash (Succès/Erreur) globale -->
+        <div id="flashMessage" class="flash hidden"></div>
+
+        <!-- Section des formulaires (Panneaux conditionnels) -->
+        <div id="formsContainer" class="forms-container">
+            
+            <!-- Formulaire Login -->
+            <section id="loginSection" class="form-section hidden">
+                <h2>Connexion</h2>
+                <form id="loginForm">
+                    <input type="text" id="loginUsername" placeholder="Nom d'utilisateur" required>
+                    <input type="password" id="loginPassword" placeholder="Mot de passe" required>
+                    <button type="submit">Valider</button>
+                    <button type="button" class="btn-cancel" onclick="appController.hideForms()">Annuler</button>
+                </form>
+            </section>
+
+            <!-- Formulaire Signin (Création compte) -->
+            <section id="signinSection" class="form-section hidden">
+                <h2>Création de compte</h2>
+                <form id="signinForm">
+                    <input type="text" id="signinUsername" placeholder="Nouveau nom d'utilisateur" required>
+                    <input type="password" id="signinPassword" placeholder="Mot de passe" required>
+                    <button type="submit" class="btn-secondary">S'inscrire</button>
+                    <button type="button" class="btn-cancel" onclick="appController.hideForms()">Annuler</button>
+                </form>
+            </section>
+
+            <!-- Formulaire Poster Message -->
+            <section id="postSection" class="form-section hidden">
+                <h2>Quoi de neuf ?</h2>
+                <form id="composeForm">
+                    <textarea id="messageText" placeholder="Écrivez votre message..." rows="3" required></textarea>
+                    <button type="submit" class="btn-primary">Publier</button>
+                    <button type="button" class="btn-cancel" onclick="appController.hideForms()">Annuler</button>
+                </form>
+            </section>
+
+        </div>
+
+        <!-- Fil d'actualité, toujours visible -->
+        <main id="feedView">
+            <div class="feed-header">
+                <h2>Derniers messages</h2>
+                <button id="refreshBtn" class="btn-icon" title="Rafraîchir">🔄</button>
+            </div>
+            
+            <div id="messagesList" class="messages-list">
+                <p class="loading">Chargement des messages...</p>
+            </div>
+        </main>
+    </div>
+
+    <script src="/pub/client.js"></script>
+</body>
+</html>
