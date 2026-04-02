@@ -2,12 +2,16 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// In-memory session store
+const sessions = {};
 
 // Servir les fichiers statiques depuis pub/
 app.use('/pub', express.static(path.join(__dirname, 'pub')));
@@ -74,7 +78,9 @@ app.post('/login', (req, res) => {
         if (err || !row) {
             return res.status(401).json({ error: "Identifiants invalides." });
         }
-        res.json({ success: true, username: row.username });
+        const token = crypto.randomUUID();
+        sessions[token] = row.username;
+        res.json({ success: true, username: row.username, token });
     });
 });
 
@@ -91,31 +97,28 @@ app.get('/messages', (req, res) => {
 
 // POST /post : Publier un nouveau message
 app.post('/post', (req, res) => {
-    const { username, password, text } = req.body;
-    if (!username || !password || !text) {
-        return res.status(400).json({ error: "Username, password et text requis." });
+    const { token, text } = req.body;
+    if (!token || !text) {
+        return res.status(400).json({ error: "Token et text requis." });
     }
 
-    // Vérifier le mot de passe avant de publier
-    const checkSql = "SELECT * FROM users WHERE username = ? AND password = ?";
-    db.get(checkSql, [username, password], (err, row) => {
-        if (err || !row) {
-            return res.status(401).json({ error: "Identifiants invalides ou utilisateur non autorisé." });
-        }
+    const username = sessions[token];
+    if (!username) {
+        return res.status(401).json({ error: "Session invalide ou expirée." });
+    }
 
-        // Si OK, on insert le message
-        const insertSql = "INSERT INTO messages (author, text) VALUES (?, ?)";
-        db.run(insertSql, [username, text], function(errPost) {
-            if (errPost) {
-                return res.status(500).json({ error: errPost.message });
-            }
-            res.status(201).json({
-                success: true,
-                id: this.lastID,
-                author: username,
-                text: text,
-                date: new Date().toISOString()
-            });
+    // Si OK, on insert le message
+    const insertSql = "INSERT INTO messages (author, text) VALUES (?, ?)";
+    db.run(insertSql, [username, text], function(errPost) {
+        if (errPost) {
+            return res.status(500).json({ error: errPost.message });
+        }
+        res.status(201).json({
+            success: true,
+            id: this.lastID,
+            author: username,
+            text: text,
+            date: new Date().toISOString()
         });
     });
 });

@@ -91,7 +91,8 @@ const appController = (() => {
     // Met à jour la Nav bar selon l'état actuel de LocalStorage
     const updateNavUI = () => {
         const username = localStorage.getItem('username');
-        const isLoggedIn = !!username;
+        const token = localStorage.getItem('token');
+        const isLoggedIn = !!username && !!token;
 
         if (isLoggedIn) {
             // Utilisateur connecté
@@ -127,7 +128,7 @@ const appController = (() => {
     // Déconnexion
     const handleLogout = () => {
         localStorage.removeItem('username');
-        localStorage.removeItem('password');
+        localStorage.removeItem('token');
         showFlash("Vous êtes déconnecté.", false);
         updateNavUI();
     };
@@ -178,7 +179,7 @@ const appController = (() => {
             if (res.ok) {
                 // Succès : Sauvegarde dans localStorage !!
                 localStorage.setItem('username', username);
-                localStorage.setItem('password', password);
+                localStorage.setItem('token', data.token);
                 
                 hideForms();
                 updateNavUI();
@@ -195,10 +196,9 @@ const appController = (() => {
     dom.composeForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = dom.composeForm.messageText.value.trim();
-        const username = localStorage.getItem('username');
-        const password = localStorage.getItem('password');
+        const token = localStorage.getItem('token');
 
-        if (!username || !password) {
+        if (!token) {
             showFlash("Vous devez être connecté pour publier.", true);
             handleLogout();
             return;
@@ -208,7 +208,7 @@ const appController = (() => {
             const res = await fetch('/post', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password, text })
+                body: JSON.stringify({ token, text })
             });
             const data = await res.json();
 
