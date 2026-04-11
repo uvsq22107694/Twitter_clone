@@ -1,7 +1,11 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
+const https = require('https');
 const path = require('path');
+const fs = require('fs');
+const argon2 = require('argon2');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +20,12 @@ app.use('/pub', express.static(path.join(__dirname, 'pub')));
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
+
+// Configuration des options de TLS pour HTTPS 
+const httpsOptions = {
+    key: fs.readFileSync(path.join(__dirname, '..', 'private', 'my-app.key')),
+    cert: fs.readFileSync(path.join(__dirname, '..', 'certs', 'my-app.crt')),
+};
 
 // Initialisation de la base de données SQLite en mémoire
 const db = new sqlite3.Database(':memory:', (err) => {
@@ -43,83 +53,127 @@ const db = new sqlite3.Database(':memory:', (err) => {
     }
 });
 
+const sessions = {};
+/* Rajouter un gestionnaire de session : 
+ * Retirer les Id de session coté server 
+ * Date d'expiration des sessions (Inactif / Absolu)
+ */
+
 // --- API JSON ---
 
 // POST /signin : Créer un nouvel utilisateur
-app.post('/signin', (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password) {
+app.post('/signin', async (req, res) => {
+    const { username, password, passwordConfirmation } = req.body;
+    if (!username || !password || !passwordConfirmation) {
         return res.status(400).json({ error: "Username et password requis." });
     }
+    if (password != passwordConfirmation) {
+        return res.status(422).json({ error: "Les mots de passe ne correspondent pas." });
+    }
 
-    const sql = "INSERT INTO users (username, password) VALUES (?, ?)";
-    db.run(sql, [username, password], function(err) {
+    try {
+        const hashedPassword = await argon2.hash(password);
+        
+        const sql = "INSERT INTO users (username, password) VALUES (?, ?)";
+        db.run(sql, [username, hashedPassword], function(err) {
         if (err) {
             // Utilisateur existe déjà ou autre erreur
             return res.status(409).json({ error: "Ce nom d'utilisateur est déjà pris ou erreur interne." });
         }
         res.status(201).json({ success: true, id: this.lastID, username });
-    });
+        });
+    } catch (err) {
+        res.status(500).json({error: "Erreur interne"});
+    }
 });
 
 // POST /login : Vérifier les identifiants utilisateur
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
+   
     const { username, password } = req.body;
     if (!username || !password) {
         return res.status(400).json({ error: "Username et password requis." });
     }
 
-    const sql = "SELECT * FROM users WHERE username = ? AND password = ?";
-    db.get(sql, [username, password], (err, row) => {
+    const sql = "SELECT * FROM users WHERE username = ?";
+    db.get(sql, [username], async (err, row) => {
         if (err || !row) {
             return res.status(401).json({ error: "Identifiants invalides." });
         }
-        res.json({ success: true, username: row.username });
+    
+        try {
+            if (await argon2.verify(row.password, password)) {
+              //res.json({ success: true, username: row.username });
+              // Création d'un identifiant de session
+              const sessionId = crypto.randomBytes(32).toString("hex");  
+              
+              sessions[sessionId] = {
+                username: row.username,
+                date: Date.now()
+              };
+
+              res.json({ success: true, sessionId, username });
+            } else {
+              return res.status(401).json({ error: "Identifiants invalides." });
+            }
+        } catch (err) {
+            res.status(500).json({error: "Erreur interne"});
+        }
     });
 });
 
 // GET /messages : Obtenir la liste de tous les messages (ordre chronologique)
 app.get('/messages', (req, res) => {
-    const sql = "SELECT * FROM messages ORDER BY date DESC";
-    db.all(sql, [], (err, rows) => {
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = parseInt(req.query.offset) || 0;
+    const loadAfterLatest = req.query.loadAfterLatest || null;
+    
+    if (loadAfterLatest) {
+        const sql = "SELECT * FROM messages WHERE date > ? ORDER BY date DESC";    
+        db.all(sql, [loadAfterLatest], (err, rows) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
-        res.json(rows);
-    });
+            res.json(rows);
+        });
+    } else {
+        const sql = "SELECT * FROM messages ORDER BY date DESC LIMIT ? OFFSET ? ";
+        db.all(sql, [limit,offset], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+            res.json(rows);
+        });
+    }
 });
 
 // POST /post : Publier un nouveau message
 app.post('/post', (req, res) => {
-    const { username, password, text } = req.body;
-    if (!username || !password || !text) {
-        return res.status(400).json({ error: "Username, password et text requis." });
+    const { sessionId, text } = req.body;
+    
+    if (!sessionId || !sessions[sessionId] ) {
+        return res.status(400).json({ error: "Vous devez être connecté pour publier des messages." });
+    } else if (!text) {
+        return res.status(400).json({ error: "Le message ne peut pas être vide." });
     }
 
-    // Vérifier le mot de passe avant de publier
-    const checkSql = "SELECT * FROM users WHERE username = ? AND password = ?";
-    db.get(checkSql, [username, password], (err, row) => {
-        if (err || !row) {
-            return res.status(401).json({ error: "Identifiants invalides ou utilisateur non autorisé." });
+    // Si OK, on insert le message
+    const insertSql = "INSERT INTO messages (author, text) VALUES (?, ?)";
+    db.run(insertSql, [sessions[sessionId].username, text], function(errPost) {
+        if (errPost) {
+            return res.status(500).json({ error: errPost.message });
         }
-
-        // Si OK, on insert le message
-        const insertSql = "INSERT INTO messages (author, text) VALUES (?, ?)";
-        db.run(insertSql, [username, text], function(errPost) {
-            if (errPost) {
-                return res.status(500).json({ error: errPost.message });
-            }
-            res.status(201).json({
-                success: true,
-                id: this.lastID,
-                author: username,
-                text: text,
-                date: new Date().toISOString()
-            });
+        res.status(201).json({
+            success: true,
+            id: this.lastID,
+            author: sessions[sessionId].username,
+            text: text,
+            date: new Date().toISOString()
         });
     });
 });
 
-app.listen(PORT, () => {
-    console.log(`Serveur démarré sur http://localhost:${PORT}`);
+// Lancement de l'écoute du serveur https sur PORT
+https.createServer(httpsOptions,app).listen(PORT, () => {
+    console.log(`Serveur démarré sur https://localhost:${PORT}`);
 });

@@ -90,8 +90,10 @@ const appController = (() => {
     
     // Met à jour la Nav bar selon l'état actuel de LocalStorage
     const updateNavUI = () => {
+        const sessionId = localStorage.getItem('sessionId');
+        // Risque potentiel
         const username = localStorage.getItem('username');
-        const isLoggedIn = !!username;
+        const isLoggedIn = !!sessionId;
 
         if (isLoggedIn) {
             // Utilisateur connecté
@@ -126,8 +128,9 @@ const appController = (() => {
 
     // Déconnexion
     const handleLogout = () => {
+        localStorage.removeItem('sessionId');
         localStorage.removeItem('username');
-        localStorage.removeItem('password');
+        //localStorage.removeItem('password');
         showFlash("Vous êtes déconnecté.", false);
         updateNavUI();
     };
@@ -140,12 +143,13 @@ const appController = (() => {
         e.preventDefault();
         const username = dom.signinForm.signinUsername.value.trim();
         const password = dom.signinForm.signinPassword.value.trim();
+        const passwordConfirmation = dom.signinForm.signinPasswordConfirmation.value.trim();
 
         try {
             const res = await fetch('/signin', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, password, passwordConfirmation })
             });
             const data = await res.json();
             
@@ -177,8 +181,9 @@ const appController = (() => {
 
             if (res.ok) {
                 // Succès : Sauvegarde dans localStorage !!
+                localStorage.setItem('sessionId', data.sessionId);
                 localStorage.setItem('username', username);
-                localStorage.setItem('password', password);
+                //localStorage.setItem('password', password);
                 
                 hideForms();
                 updateNavUI();
@@ -195,10 +200,10 @@ const appController = (() => {
     dom.composeForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = dom.composeForm.messageText.value.trim();
-        const username = localStorage.getItem('username');
-        const password = localStorage.getItem('password');
+        const sessionId = localStorage.getItem('sessionId');
+        
 
-        if (!username || !password) {
+        if (!sessionId) {
             showFlash("Vous devez être connecté pour publier.", true);
             handleLogout();
             return;
@@ -208,14 +213,14 @@ const appController = (() => {
             const res = await fetch('/post', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password, text })
+                body: JSON.stringify({ sessionId, text })
             });
             const data = await res.json();
 
             if (res.ok) {
                 hideForms();
                 showFlash("Votre message a été publié !", false);
-                fetchMessages();
+                loadInitialMessages();
             } else {
                 showFlash(data.error || "Erreur de publication. Veuillez vous reconnecter.", true);
                 if (res.status === 401) {
@@ -228,43 +233,111 @@ const appController = (() => {
     });
 
     // 4. Flux des messages : /messages GET
-    const fetchMessages = async () => {
+    const messageState = {
+        messages: [],
+        latestTimestamp: null,
+        offset: 0,
+        endOfpage: false,
+        isLoading: false,
+        limit: 10
+    }
+    
+    // Créé la structure html d'un message 
+    const buildMessageCard = (message) => {
+        const dateStr = new Date(message.date).toLocaleString('fr-FR', {
+            dateStyle: 'medium', timeStyle: 'short'
+        });
+        
+        const card = document.createElement('div');
+        card.className = 'message-card';
+        card.innerHTML = `
+            <div class="msg-header">
+                <span class="msg-author">@${escapeHTML(message.author)}</span>
+                <span class="msg-date">· ${dateStr}</span>
+            </div>
+            <div class="msg-text">${escapeHTML(message.text)}</div>
+        `;
+        return card;
+    }
+
+    // Ajoute un message en fin de liste
+    const appendMessageCard = (message) => {
+        const card = buildMessageCard(message);
+        dom.messagesList.appendChild(card);
+    }
+
+    // Ajoute un message en tête de liste
+    const prependMessageCard = (message) => {
+        const card = buildMessageCard(message);
+        dom.messagesList.prepend(card);
+    }
+
+    // Récupère les premiers messages et les charge sur la page
+    const loadInitialMessages = async () => {
         dom.messagesList.innerHTML = '<p class="loading">Actualisation des messages...</p>';
         try {
-            const res = await fetch('/messages');
+            const res = await fetch(`/messages?limit=${messageState.limit}&offset=0`);
             if (!res.ok) throw new Error("Erreur serveur API");
             const messages = await res.json();
-            renderMessages(messages);
+
+            messageState.messages = messages;
+            messageState.offset = messages.length;
+            messageState.lastTimestamp = messages.length > 0 ? messages[0].date : null;
+            messageState.endOfpage = messages.length != messageState.limit;
+            
+            dom.messagesList.innerHTML = '';
+            if (messages.length === 0) {
+                dom.messagesList.innerHTML = '<p style="text-align: center; color: #657786; padding: 20px;">Aucun message à afficher pour l\'instant.</p>';
+                return;
+            }
+            messages.forEach(msg => appendMessageCard(msg));
+        } catch (err) {
+            dom.messagesList.innerHTML = '<p class="flash error">Impossible de charger le fil d\'actualité.</p>';
+        }
+    }
+
+    // Récupère tout les messages récents et les charge sur la page 
+    const loadNewMessages = async () => {
+        try {
+            const res = await fetch(`/messages?loadAfterLatest=${messageState.latestTimestamp}`);
+            if(!res.ok) throw new Error("Erreur serveur API");
+            const messages = await res.json();
+            
+            if (messages.length === 0) return;
+
+            messageState.messages = [...messages, ...messageState.messages];
+            messageState.offset += messages.length ;
+            messageState.latestTimestamp = messages[0].date;
+            
+            messages.forEach(msg => prependMessageCard(msg));
         } catch (err) {
             dom.messagesList.innerHTML = '<p class="flash error">Impossible de charger le fil d\'actualité.</p>';
         }
     };
 
-    const renderMessages = (messages) => {
-        dom.messagesList.innerHTML = '';
-        if (messages.length === 0) {
-            dom.messagesList.innerHTML = '<p style="text-align: center; color: #657786; padding: 20px;">Aucun message à afficher pour l\'instant.</p>';
-            return;
-        }
-
-        messages.forEach(msg => {
-            const dateStr = new Date(msg.date).toLocaleString('fr-FR', {
-                dateStyle: 'medium', timeStyle: 'short'
-            });
+    // Récupère les messages plus anciens basé sur un offset et une limite de quantité
+    const loadOldMessages = async () => {
+        if (messageState.isLoading || messageState.endOfpage) return;
+        try {
+            messageState.isLoading = true;
             
-            const card = document.createElement('div');
-            card.className = 'message-card';
-            card.innerHTML = `
-                <div class="msg-header">
-                    <span class="msg-author">@${escapeHTML(msg.author)}</span>
-                    <span class="msg-date">· ${dateStr}</span>
-                </div>
-                <div class="msg-text">${escapeHTML(msg.text)}</div>
-            `;
-            dom.messagesList.appendChild(card);
-        });
-    };
+            const res = await fetch(`/messages?limit=${messageState.limit}&offset=${messageState.offset}`);
+            if(!res.ok) throw new Error("Erreur serveur API");
+            const messages = await res.json();
+            
+            if (messages.length === 0) return;
 
+            messageState.messages = [...messages, ...messageState.messages];
+            messageState.offset += messages.length ;
+            messageState.endOfpage = messages.length != messageState.limit;
+            
+            messages.forEach(msg => appendMessageCard(msg));
+            
+            messageState.isLoading = false;
+        } catch (err) {
+            dom.messagesList.innerHTML = '<p class="flash error">Impossible de charger le fil d\'actualité.</p>';
+        }
+    };
 
     // --- Initialisation ---
     const init = () => {
@@ -273,12 +346,17 @@ const appController = (() => {
         dom.navSigninBtn.addEventListener('click', () => showForm('signinSection'));
         dom.navPostBtn.addEventListener('click', () => showForm('postSection'));
         dom.navLogoutBtn.addEventListener('click', handleLogout);
-        
-        dom.refreshBtn.addEventListener('click', fetchMessages);
-        
+        dom.refreshBtn.addEventListener('click', loadInitialMessages);
+
+        window.addEventListener('scroll', () => {
+            const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 100;
+            if (nearBottom) loadOldMessages();
+        });
+
         // Premier setup
+        loadInitialMessages();
         updateNavUI();
-        fetchMessages();
+        setInterval(loadNewMessages, 5000);
     };
 
     // Expose fonctions si besoin au global (par exemple pour onClick="appController.hideForms()")
