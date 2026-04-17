@@ -18,6 +18,9 @@ app.use(express.json({limit: '1kb'}));
 // Limiter la taille des requêtes
 app.use(express.urlencoded({limit: '1kb',extended: true , parameterLimit: 100}))
 
+// In-memory session store
+const sessions = {};
+
 // Servir les fichiers statiques depuis pub/
 app.use('/pub', express.static(path.join(__dirname, 'pub')));
 
@@ -26,11 +29,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Configuration des options de TLS pour HTTPS 
-const httpsOptions = {
-    key: fs.readFileSync(path.join(__dirname, '..', 'private', 'my-app.key')),
-    cert: fs.readFileSync(path.join(__dirname, '..', 'certs', 'my-app.crt')),
-};
+// Les options TLS pour HTTPS seront chargées dynamiquement uniquement en local
 
 // Initialisation de la base de données SQLite en mémoire
 const db = new sqlite3.Database(':memory:', (err) => {
@@ -78,9 +77,6 @@ const db = new sqlite3.Database(':memory:', (err) => {
         console.log("Tables 'users', 'messages' et 'conversations' initialisées.");
     }
 });
-
-// Gestionnaire de sessions
-const sessions = {};
 
 // Middleware pour gérer les sessions des utilisateurs
 const authenticate =  (req, res, next) => {
@@ -316,7 +312,19 @@ app.post('/messages/private', authenticate, verifyParameters(sc.postPrivateMessa
     );
 });
 
-// Lancement de l'écoute du serveur https sur PORT
-https.createServer(httpsOptions,app).listen(PORT, () => {
-    console.log(`Serveur démarré sur https://localhost:${PORT}`);
-});
+// Lancement de l'écoute du serveur
+if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT_NAME) {
+    // Railway gère le HTTPS de son côté, on expose le serveur Express classique (HTTP)
+    app.listen(PORT, () => {
+        console.log(`Serveur démarré sur port ${PORT} (Prod/Railway)`);
+    });
+} else {
+    // En local, on charge les certificats pour utiliser HTTPS
+    const httpsOptions = {
+        key: fs.readFileSync(path.join(__dirname, '..', 'private', 'my-app.key')),
+        cert: fs.readFileSync(path.join(__dirname, '..', 'certs', 'my-app.crt')),
+    };
+    https.createServer(httpsOptions, app).listen(PORT, () => {
+        console.log(`Serveur démarré sur https://localhost:${PORT} (Local)`);
+    });
+}
