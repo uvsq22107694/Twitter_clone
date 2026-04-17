@@ -77,9 +77,6 @@ const db = new sqlite3.Database(':memory:', (err) => {
     }
 });
 
-// Gestionnaire de sessions
-const sessions = {};
-
 // Middleware pour gérer les sessions des utilisateurs
 const authenticate =  (req, res, next) => {
     const sessionId = req.headers['sessionid'];
