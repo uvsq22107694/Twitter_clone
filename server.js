@@ -24,11 +24,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Configuration des options de TLS pour HTTPS 
-const httpsOptions = {
-    key: fs.readFileSync(path.join(__dirname, '..', 'private', 'my-app.key')),
-    cert: fs.readFileSync(path.join(__dirname, '..', 'certs', 'my-app.crt')),
-};
+// Les options TLS pour HTTPS seront chargées dynamiquement uniquement en local
 
 // Initialisation de la base de données SQLite en mémoire
 const db = new sqlite3.Database(':memory:', (err) => {
@@ -319,7 +315,19 @@ app.post('/messages/private', authenticate, (req, res) => {
     );
 });
 
-// Lancement de l'écoute du serveur https sur PORT
-https.createServer(httpsOptions,app).listen(PORT, () => {
-    console.log(`Serveur démarré sur https://localhost:${PORT}`);
-});
+// Lancement de l'écoute du serveur
+if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT_NAME) {
+    // Railway gère le HTTPS de son côté, on expose le serveur Express classique (HTTP)
+    app.listen(PORT, () => {
+        console.log(`Serveur démarré sur port ${PORT} (Prod/Railway)`);
+    });
+} else {
+    // En local, on charge les certificats pour utiliser HTTPS
+    const httpsOptions = {
+        key: fs.readFileSync(path.join(__dirname, '..', 'private', 'my-app.key')),
+        cert: fs.readFileSync(path.join(__dirname, '..', 'certs', 'my-app.crt')),
+    };
+    https.createServer(httpsOptions, app).listen(PORT, () => {
+        console.log(`Serveur démarré sur https://localhost:${PORT} (Local)`);
+    });
+}
