@@ -1,5 +1,5 @@
 const express = require('express');
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const https = require('https');
 const path = require('path');
@@ -31,46 +31,51 @@ const httpsOptions = {
 };
 
 // Initialisation de la base de données SQLite en mémoire
-const db = new Database(':memory:');
-console.log('Connecté à la base SQLite en mémoire.');
+const db = new sqlite3.Database(':memory:', (err) => {
+    if (err) {
+        console.error('Erreur SQLite:', err.message);
+    } else {
+        console.log('Connecté à la base SQLite en mémoire.');
+        
+        // Table utilisateurs
+        db.run(`CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )`);
 
-// Table utilisateurs
-db.exec(`CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL
-)`);
+        // Table messages
+        db.run(`CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            author TEXT NOT NULL,
+            text TEXT NOT NULL
+        )`);
 
-// Table messages
-db.exec(`CREATE TABLE messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    author TEXT NOT NULL,
-    text TEXT NOT NULL
-)`);
+        // Table conversations
+        db.run(`CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user1 TEXT NOT NULL,
+            user2 TEXT NOT NULL,
+            lastMessage TEXT,
+            lastMessageAt INTEGER,
+            UNIQUE(user1, user2) 
+        )`);
 
-// Table conversations
-db.exec(`CREATE TABLE conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user1 TEXT NOT NULL,
-    user2 TEXT NOT NULL,
-    lastMessage TEXT,
-    lastMessageAt INTEGER,
-    UNIQUE(user1, user2)
-)`);
+        // Table pvMessages
+        db.run(`CREATE TABLE pvMessages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversationId INTEGER NOT NULL,
+            author TEXT NOT NULL,
+            text TEXT NOT NULL,
+            date INTEGER NOT NULL,
+            read INTEGER DEFAULT 0,
+            FOREIGN KEY (conversationId) REFERENCES conversations(id)
+        )`);
 
-// Table pvMessages
-db.exec(`CREATE TABLE pvMessages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversationId INTEGER NOT NULL,
-    author TEXT NOT NULL,
-    text TEXT NOT NULL,
-    date INTEGER NOT NULL,
-    read INTEGER DEFAULT 0,
-    FOREIGN KEY (conversationId) REFERENCES conversations(id)
-)`);
-
-console.log("Tables 'users', 'messages' et 'conversations' initialisées.");
+        console.log("Tables 'users', 'messages' et 'conversations' initialisées.");
+    }
+});
 
 // Middleware pour gérer les sessions des utilisateurs
 const authenticate =  (req, res, next) => {
@@ -114,13 +119,12 @@ app.post('/signin', async (req, res) => {
         // Hashage du mot de passe
         const hashedPassword = await argon2.hash(password);
         const sql = "INSERT INTO users (username, password) VALUES (?, ?)";
-        try {
-            const result = db.prepare(sql).run(username, hashedPassword);
-            res.status(201).json({ success: true, id: result.lastInsertRowid, username });
-        } catch (dbErr) {
+        db.run(sql, [username, hashedPassword], function(err) {
             // Utilisateur existe déjà ou autre erreur
-            return res.status(409).json({ error: "Ce nom d'utilisateur est déjà pris ou erreur interne." });
-        }
+            if (err) return res.status(409).json({ error: "Ce nom d'utilisateur est déjà pris ou erreur interne." });
+        
+            res.status(201).json({ success: true, id: this.lastID, username });
+        });
     } catch (err) {
         res.status(500).json({error: "Erreur interne"});
     }
@@ -135,26 +139,27 @@ app.post('/login', async (req, res) => {
 
     // Recherche de l'utilisateur d'après ses identifiants
     const sql = "SELECT * FROM users WHERE username = ?";
-    const row = db.prepare(sql).get(username);
-    if (!row) return res.status(401).json({ error: "Identifiants invalides." });
-
-    try {
-        // Verification du mdp haché
-        if (await argon2.verify(row.password, password)) {
-            
-            // Création d'un identifiant de session
-            const sessionId = crypto.randomBytes(32).toString("hex");     
-            sessions[sessionId] = {
-              username: row.username,
-              date: Date.now()
-            };
-            res.json({ success: true, sessionId, username });
-        } else {
-            return res.status(401).json({ error: "Identifiants invalides." });
+    db.get(sql, [username], async (err, row) => {
+        if (err || !row) return res.status(401).json({ error: "Identifiants invalides." });
+        
+        try {
+            // Verification du mdp haché
+            if (await argon2.verify(row.password, password)) {
+                
+                // Création d'un identifiant de session
+                const sessionId = crypto.randomBytes(32).toString("hex");     
+                sessions[sessionId] = {
+                  username: row.username,
+                  date: Date.now()
+                };
+                res.json({ success: true, sessionId, username });
+            } else {
+                return res.status(401).json({ error: "Identifiants invalides." });
+            }
+        } catch (err) {
+            res.status(500).json({error: "Erreur interne"});
         }
-    } catch (err) {
-        res.status(500).json({error: "Erreur interne"});
-    }
+    });
 });
 
 // GET /messages : Obtenir la liste de tous les messages (ordre chronologique)
@@ -164,18 +169,19 @@ app.get('/messages', (req, res) => {
     const loadAfterLatest = req.query.loadAfterLatest || null; 
     
     // Récupérer les messages les plus récents
-    try {
-        if (loadAfterLatest) {
-            const sql = "SELECT * FROM messages WHERE date > ? ORDER BY date DESC";
-            const rows = db.prepare(sql).all(loadAfterLatest);
+    if (loadAfterLatest) {
+        const sql = "SELECT * FROM messages WHERE date > ? ORDER BY date DESC";    
+        db.all(sql, [loadAfterLatest], (err, rows) => {
+        if (err) return res.status(500).json({ error: "Erreur interne" });
+        
             res.json(rows);
-        } else { // Récupérer les premier message en partant d'un offset
-            const sql = "SELECT * FROM messages ORDER BY date DESC LIMIT ? OFFSET ?";
-            const rows = db.prepare(sql).all(limit, offset);
+        });
+    } else { // Récupérer les premier message en partant d'un offset
+        const sql = "SELECT * FROM messages ORDER BY date DESC LIMIT ? OFFSET ? ";
+        db.all(sql, [limit,offset], (err, rows) => {
+        if (err) return res.status(500).json({ error: "Erreur interne" });
             res.json(rows);
-        }
-    } catch (err) {
-        res.status(500).json({ error: "Erreur interne" });
+        });
     }
 });
 
@@ -189,19 +195,18 @@ app.post('/post', authenticate, (req, res) => {
     }
 
     // Insérer le messgae dans la base de données
-    try {
-        const insertSql = "INSERT INTO messages (author, text) VALUES (?, ?)";
-        const result = db.prepare(insertSql).run(username, text);
+    const insertSql = "INSERT INTO messages (author, text) VALUES (?, ?)";
+    db.run(insertSql, [username, text], function(errPost) {
+        if (errPost) return res.status(500).json({ error: "Erreur interne" });
+        
         res.status(201).json({
             success: true,
-            id: result.lastInsertRowid,
+            id: this.lastID,
             author: username,
             text: text,
             date: new Date().toISOString()
         });
-    } catch (err) {
-        res.status(500).json({ error: "Erreur interne" });
-    }
+    });
 });
 
 // GET /conversations : Obtenir la liste de toutes les conversations pour un utilisateur
@@ -209,13 +214,12 @@ app.get('/conversations', authenticate, (req, res) => {
     const username = req.user.username;
 
     // Liste de toutes les conversations auquelles un utilisateur a participé
-    try {
-        const sql = "SELECT * FROM conversations WHERE user1 = ? OR user2 = ? ORDER BY lastMessageAt DESC";
-        const rows = db.prepare(sql).all(username, username);
+    const sql = "SELECT * FROM conversations WHERE user1 = ? OR user2 = ? ORDER BY lastMessageAt DESC";    
+    db.all(sql, [username,username], (err, rows) => {
+        if (err) return res.status(500).json({ error: "Erreur interne" });
+        
         return res.json(rows);
-    } catch (err) {
-        res.status(500).json({ error: "Erreur interne" });
-    }
+    });
 });
 
 // POST /conversations : Commencer une conversation avec un utilisateur 
@@ -230,25 +234,30 @@ app.post('/conversations', authenticate, (req, res) => {
     }
 
     // Verifier que l'utilisateur existe
-    try {
-        const verifySql = "SELECT * FROM users WHERE username = ?";
-        const row = db.prepare(verifySql).get(recipient);
-        if (!row) return res.status(500).json({ error: "Cet utilisateur n'éxiste pas." });
-
+    const verifySql ="SELECT * FROM users WHERE username = ?";
+    db.get(verifySql, [recipient], (err,row) => {
+        if (err || !row) return res.status(500).json({ error: "Cet utilisateur n'éxiste pas." });
+    
         // Respect de la contrainte d'unicité de la table conversations
         const [user1, user2] = [username, recipient].sort();
 
         // Insérer la nouvelle convo
         const insertSql = `INSERT OR IGNORE INTO conversations (user1, user2, lastMessage, lastMessageAt) VALUES (?, ?, ?, ?)`;
-        db.prepare(insertSql).run(user1, user2, null, Date.now());
+        db.run(insertSql, [user1, user2, null, Date.now()], (err) => {
+                if (err) return res.status(500).json({ error: "Erreur interne." });
 
-        // Renvoyer l'identifiant de la conversation
-        const sql = `SELECT * FROM conversations WHERE user1 = ? AND user2 = ?`;
-        const conversation = db.prepare(sql).get(user1, user2);
-        res.status(201).json({ success: true, conversationId: conversation.id });
-    } catch (err) {
-        res.status(500).json({ error: "Erreur interne." });
-    }
+                // Renvoyer l'identifiant de la conversation'
+                const sql = `SELECT * FROM conversations WHERE user1 = ? AND user2 = ?`;
+                db.get( sql, [user1, user2], (err, conversation) => {
+                        if (err) return res.status(500).json({ error: "Erreur interne." });
+                        res.status(201).json({ 
+                            success: true,
+                            conversationId: conversation.id });
+                    }
+                );
+            }
+        );
+    });
 });
 
 // GET /messages/private : Obtenir la liste des messages pour une conversation donnée
@@ -261,18 +270,19 @@ app.get('/messages/private', authenticate, (req, res) => {
     }
 
     // Vérifier si l'utilisateur à participé à la conversation
-    try {
-        const verifySql = `SELECT * FROM conversations WHERE id = ? AND (user1 = ? OR user2 = ?)`;
-        const conversation = db.prepare(verifySql).get(conversationId, username, username);
-        if (!conversation) return res.status(403).json({ error: "Accès refusé." });
-
-        // Si OK, on récupère les messages
-        const sql = `SELECT * FROM pvMessages WHERE conversationId = ? ORDER BY date ASC`;
-        const rows = db.prepare(sql).all(conversationId);
-        res.json(rows);
-    } catch (err) {
-        res.status(500).json({ error: "Erreur interne." });
-    }
+    const verifySql = `SELECT * FROM conversations WHERE id = ? AND (user1 = ? OR user2 = ?)`;
+    db.get(verifySql, [conversationId, username, username], (err, conversation) => {
+            if (err || !conversation) return res.status(403).json({ error: "Accès refusé." });
+            
+            // Si OK, on récupère les messages
+            const sql = `SELECT * FROM pvMessages WHERE conversationId = ? ORDER BY date ASC`;
+            db.all( sql, [conversationId], (err, rows) => {
+                    if (err) return res.status(500).json({ error: "Erreur interne." });
+                    res.json(rows);
+                }
+            );
+        }
+    );
 });
 
 // POST /messages/private : Envoyer un message privé
@@ -287,23 +297,26 @@ app.post('/messages/private', authenticate, (req, res) => {
     }
 
     // Vérifier si l'utilisateur à participé à la conversation
-    try {
-        const verifySql = `SELECT * FROM conversations WHERE id = ? AND (user1 = ? OR user2 = ?)`;
-        const conversation = db.prepare(verifySql).get(conversationId, username, username);
-        if (!conversation) return res.status(403).json({ error: "Accès refusé." });
-
-        // Si OK on insère le message
-        const insertSql = `INSERT INTO pvMessages (conversationId, author, text, date) VALUES (?, ?, ?, ?)`;
-        db.prepare(insertSql).run(conversationId, username, text, Date.now());
-
-        // Puis on met à jour la conversation
-        const updateSql = `UPDATE conversations SET lastMessage = ?, lastMessageAt = ? WHERE id = ?`;
-        db.prepare(updateSql).run(text, Date.now(), conversationId);
-
-        res.status(201).json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: "Erreur interne." });
-    }
+    const verifySql = `SELECT * FROM conversations WHERE id = ? AND (user1 = ? OR user2 = ?)` ;
+    db.get( verifySql, [conversationId, username, username], (err, conversation) => {
+            if (err || !conversation) return res.status(403).json({ error: "Accès refusé." });
+            
+            // Si OK on insère le message
+            const insertSql = `INSERT INTO pvMessages (conversationId, author, text, date) VALUES (?, ?, ?, ?)`;
+            db.run(insertSql, [conversationId, username, text, Date.now()], (err) => {
+                    if (err) return res.status(500).json({ error: "Erreur interne." });
+                    
+                    // Puis on met à jour la conversation 
+                    const updateSql = `UPDATE conversations SET lastMessage = ?, lastMessageAt = ? WHERE id = ?`;
+                    db.run(updateSql, [text, Date.now(), conversationId], (err) => {
+                            if (err) return res.status(500).json({ error: "Erreur interne." });
+                            res.status(201).json({ success: true });
+                        }
+                    );
+                }
+            );
+        }
+    );
 });
 
 // Lancement de l'écoute du serveur https sur PORT
