@@ -64,7 +64,7 @@ const appController = (() => {
         limit: 10
     }
 
-    // Suit l'indetifiant de la conversation en cours
+    // Suit l'identifiant de la conversation en cours
     const conversationState = {
         currentConversationId: null
     };
@@ -211,7 +211,7 @@ const appController = (() => {
 
     // --- Builders de formats html  ---
 
-    // Créé la structure html d'un message 
+    // Crée la structure html d'un message 
     const buildMessageCard = (message) => {
         const dateStr = new Date(message.date).toLocaleString('fr-FR', {
             dateStyle: 'medium', timeStyle: 'short'
@@ -241,7 +241,7 @@ const appController = (() => {
         dom.messagesList.prepend(card);
     }
 
-    // Créé la structure html d'une conversation 
+    // Crée la structure html d'une conversation 
     const buildConversationCard = (conversation) => {
         const dateStr = conversation.lastMessageAt 
             ? new Date(conversation.lastMessageAt).toLocaleString('fr-FR', { 
@@ -283,7 +283,7 @@ const appController = (() => {
             messageState.messages = data;
             messageState.offset = data.length;
             messageState.latestTimestamp = data.length > 0 ? data[0].date : null;
-            messageState.endOfpage = data.length != messageState.limit;
+            messageState.endOfpage = data.length !== messageState.limit;
             
             dom.messagesList.innerHTML = '';
             if (data.length === 0) {
@@ -311,7 +311,7 @@ const appController = (() => {
             
             data.forEach(msg => prependMessageCard(msg));
         } catch (err) {
-            console.error('Échec de réucpération des nouveaux messgaes:',err);
+            console.error('Échec de récupération des nouveaux messages:',err);
         }
     };
 
@@ -328,11 +328,9 @@ const appController = (() => {
 
             messageState.messages = [...messageState.messages, ...data];
             messageState.offset += data.length ;
-            messageState.endOfpage = data.length != messageState.limit;
+            messageState.endOfpage = data.length !== messageState.limit;
             
             data.forEach(msg => appendMessageCard(msg));
-            
-            messageState.isLoading = false;
         } catch (err) {
             dom.messagesList.innerHTML = '<p class="flash error">Impossible de charger le fil d\'actualité.</p>';
         } finally {

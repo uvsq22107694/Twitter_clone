@@ -32,50 +32,52 @@ app.get('/', (req, res) => {
 // Les options TLS pour HTTPS seront chargées dynamiquement uniquement en local
 
 // Initialisation de la base de données SQLite en mémoire
-const db = new sqlite3.Database(':memory:', (err) => {
+const db = new sqlite3.Database('./data.db', (err) => {
     if (err) {
         console.error('Erreur SQLite:', err.message);
+        return;
     } else {
         console.log('Connecté à la base SQLite en mémoire.');
         
-        // Table utilisateurs
-        db.run(`CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )`);
+        db.serialize(() => { 
+            // Table utilisateurs
+            db.run(`CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            )`);
 
-        // Table messages
-        db.run(`CREATE TABLE messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date DATETIME DEFAULT CURRENT_TIMESTAMP,
-            author TEXT NOT NULL,
-            text TEXT NOT NULL
-        )`);
+            // Table messages
+            db.run(`CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                author TEXT NOT NULL,
+                text TEXT NOT NULL
+            )`);
 
-        // Table conversations
-        db.run(`CREATE TABLE conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user1 TEXT NOT NULL,
-            user2 TEXT NOT NULL,
-            lastMessage TEXT,
-            lastMessageAt INTEGER,
-            UNIQUE(user1, user2) 
-        )`);
+            // Table conversations
+            db.run(`CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user1 TEXT NOT NULL,
+                user2 TEXT NOT NULL,
+                lastMessage TEXT,
+                lastMessageAt INTEGER,
+                UNIQUE(user1, user2) 
+            )`);
 
-        // Table pvMessages
-        db.run(`CREATE TABLE pvMessages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversationId INTEGER NOT NULL,
-            author TEXT NOT NULL,
-            text TEXT NOT NULL,
-            date INTEGER NOT NULL,
-            read INTEGER DEFAULT 0,
-            FOREIGN KEY (conversationId) REFERENCES conversations(id)
-        )`);
+            // Table pvMessages
+            db.run(`CREATE TABLE IF NOT EXISTS pvMessages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversationId INTEGER NOT NULL,
+                author TEXT NOT NULL,
+                text TEXT NOT NULL,
+                date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (conversationId) REFERENCES conversations(id)
+            )`);
 
-        console.log("Tables 'users', 'messages' et 'conversations' initialisées.");
-    }
+            console.log("Tables 'users', 'messages', 'conversations' et 'pvMessages' initialisées.");
+        });
+    }   
 });
 
 // Middleware pour gérer les sessions des utilisateurs

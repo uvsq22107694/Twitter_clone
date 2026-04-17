@@ -81,6 +81,9 @@ dist
 .DS_Store
 Thumbs.db
 
+# Database files
+*.db
+
 # Editor directories and files
 .vscode/
 .idea/
