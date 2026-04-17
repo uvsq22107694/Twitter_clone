@@ -18,8 +18,12 @@
                 <button id="navLoginBtn" class="nav-btn">Se connecter</button>
                 <button id="navSigninBtn" class="nav-btn btn-secondary">Créer un compte</button>
                 <span id="navUsername" class="nav-text hidden"></span>
+                <button id="navAddBtn" class="nav-btn hidden">Add</button>
+                <button id="navHomeBtn" class="nav-btn hidden">Home</button>
+                <button id="navConversationBtn" class="nav-btn hidden">Messagerie</button>
                 <button id="navPostBtn" class="nav-btn btn-primary hidden">Nouveau message</button>
                 <button id="navLogoutBtn" class="nav-btn hidden">Se déconnecter</button>
+                
             </nav>
         </header>
 
@@ -46,6 +50,7 @@
                 <form id="signinForm">
                     <input type="text" id="signinUsername" placeholder="Nouveau nom d'utilisateur" required>
                     <input type="password" id="signinPassword" placeholder="Mot de passe" required>
+                    <input type="password" id="signinPasswordConfirmation" placeholder="Confirmer le mot de passe" required>
                     <button type="submit" class="btn-secondary">S'inscrire</button>
                     <button type="button" class="btn-cancel" onclick="appController.hideForms()">Annuler</button>
                 </form>
@@ -61,9 +66,29 @@
                 </form>
             </section>
 
+            <!-- Formulaire Ajouter Conversation -->
+            <section id="addSection" class="form-section hidden">
+                <h2>Ajouter un utilisateur</h2>
+                <form id="addForm">
+                    <input type="text" id="addUser" placeholder="Nom du destinantaire" required>
+                    <button type="submit">Ajouter</button>
+                    <button type="button" class="btn-cancel" onclick="appController.hideForms()">Annuler</button>
+                </form>
+            </section>
+
+            <!-- Formulaire Poster Message Privé -->
+            <section id="privateSection" class="form-section hidden">
+                <h2>Envoyer un message</h2>
+                <form id="privateForm">
+                    <textarea id="privateText" placeholder="Écrivez votre message..." rows="3" required></textarea>
+                    <button type="submit" class="btn-primary">Envoyer</button>
+                    <button type="button" class="btn-cancel" onclick="appController.hideForms()">Annuler</button>
+                </form>
+            </section>
+
         </div>
 
-        <!-- Fil d'actualité, toujours visible -->
+        <!-- Fil d'actualité -->
         <main id="feedView">
             <div class="feed-header">
                 <h2>Derniers messages</h2>
@@ -74,6 +99,33 @@
                 <p class="loading">Chargement des messages...</p>
             </div>
         </main>
+
+        <!-- Conversations -->
+        <main id="conversationView" class="hidden">
+            <div class="feed-header">
+                <h2>Conversations</h2>
+                <button id="refreshConversationBtn" class="btn-icon" title="Rafraîchir">🔄</button>
+            </div>
+            
+            <div id="conversationList" class="conversation-list">
+                <p class="loading">Chargement des conversation...</p>
+            </div>
+        </main>
+
+        <!-- Messagerie privée-->
+        <main id="privateView" class="hidden">
+            <div class="feed-header">
+                <h2>Messagerie</h2>
+                <button id="navPvmBtn" class="nav-btn">Send message</button>
+                <button id="refreshPvmBtn" class="btn-icon" title="Rafraîchir">🔄</button>
+            </div>
+            
+            <div id="privateList" class="private-list">
+                <p class="loading">Chargement des messages...</p>
+                
+            </div>
+        </main>
+    
     </div>
 
     <script src="/pub/client.js"></script>

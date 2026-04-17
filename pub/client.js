@@ -7,31 +7,73 @@ const appController = (() => {
         // Navigation / User state
         navLoginBtn: document.getElementById('navLoginBtn'),
         navSigninBtn: document.getElementById('navSigninBtn'),
-        navPostBtn: document.getElementById('navPostBtn'),
-        navLogoutBtn: document.getElementById('navLogoutBtn'),
-        navUsername: document.getElementById('navUsername'),
         
-        // Sections / Forms
+        navLogoutBtn: document.getElementById('navLogoutBtn'),
+        navPostBtn: document.getElementById('navPostBtn'),
+        navUsername: document.getElementById('navUsername'),
+        navHomeBtn: document.getElementById('navHomeBtn'),
+        navConversationBtn: document.getElementById('navConversationBtn'),
+        
+        navAddBtn: document.getElementById('navAddBtn'),
+        navPvmBtn: document.getElementById('navPvmBtn'),
+        
+        // Sections 
         loginSection: document.getElementById('loginSection'),
         signinSection: document.getElementById('signinSection'),
         postSection: document.getElementById('postSection'),
+        addSection: document.getElementById('addSection'),
+        privateSection: document.getElementById('privateSection'),
         
+        // Forms
         loginForm: document.getElementById('loginForm'),
         signinForm: document.getElementById('signinForm'),
         composeForm: document.getElementById('composeForm'),
+        addForm: document.getElementById('addForm'),
+        privateForm: document.getElementById('privateForm'),
         
         // Feed
         messagesList: document.getElementById('messagesList'),
         refreshBtn: document.getElementById('refreshBtn'),
+
+        // Conversations
+        conversationList: document.getElementById('conversationList'),
+        refreshConversationBtn: document.getElementById('refreshConversationBtn'),
+
+        // Private messages 
+        privateList: document.getElementById('privateList'),
+        refreshPvmBtn: document.getElementById('refreshPvmBtn'),
+
+        // Pages
+        feedView: document.getElementById('feedView'),
+        conversationView: document.getElementById('conversationView'),
+        privateView: document.getElementById('privateView'),
         
         // Messages globaux
         flashMessage: document.getElementById('flashMessage')
+    };
+
+    // --- Variables d'Etat ---
+    
+    // Suit l'état de messagesList
+    const messageState = {
+        messages: [],
+        latestTimestamp: null,
+        offset: 0,
+        endOfpage: false,
+        isLoading: false,
+        limit: 10
+    }
+
+    // Suit l'indetifiant de la conversation en cours
+    const conversationState = {
+        currentConversationId: null
     };
 
     // --- Utilitaires ---
     
     // Echappement XSS basique
     const escapeHTML = (str) => {
+        if (!str) return '';
         return str.replace(/[&<>'"]/g, tag => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
         }[tag]));
@@ -64,16 +106,14 @@ const appController = (() => {
         }, 4000);
     };
 
+    
+    const sectionElements =  [dom.loginSection, dom.signinSection, dom.postSection, dom.addSection, dom.privateSection];
+    const formElements =  [dom.loginForm, dom.signinForm, dom.composeForm, dom.addForm, dom.privateForm];
     // Masque tous les formulaires
     const hideForms = () => {
-        dom.loginSection.classList.add('hidden');
-        dom.signinSection.classList.add('hidden');
-        dom.postSection.classList.add('hidden');
-        
+        sectionElements.forEach( e => e.classList.add('hidden'));
         // Réinitialise les inputs
-        dom.loginForm.reset();
-        dom.signinForm.reset();
-        dom.composeForm.reset();
+        formElements.forEach(e => e.reset());
     };
 
     // Affiche un formulaire spécifique
@@ -85,14 +125,37 @@ const appController = (() => {
         if (firstInput) firstInput.focus();
     };
 
+    const pages = [dom.feedView, dom.conversationView, dom.privateView];
+
+    // Affiche une page spécifique
+    const showPage = (page) => {
+        hideForms();
+        pages.forEach(p => {
+            p.classList.add('hidden');
+        });
+        page.classList.remove('hidden');
+    }
+
+
+    const fetchAPI = async ( url, options = {}) => {
+        const headers = {
+            'Content-Type': 'application/json',
+            'sessionid': localStorage.getItem('sessionId'),
+            ...options.headers
+        };
+        const res = await fetch(url , { ...options,headers})
+        const data = await res.json() ;
+        return {res, data};
+    }
 
     // --- Logique d'authentification UI ---
     
     // Met à jour la Nav bar selon l'état actuel de LocalStorage
     const updateNavUI = () => {
+        const sessionId = localStorage.getItem('sessionId');
+        // Risque potentiel
         const username = localStorage.getItem('username');
-        const token = localStorage.getItem('token');
-        const isLoggedIn = !!username && !!token;
+        const isLoggedIn = !!sessionId;
 
         if (isLoggedIn) {
             // Utilisateur connecté
@@ -104,6 +167,9 @@ const appController = (() => {
             
             dom.navPostBtn.classList.remove('hidden');
             dom.navLogoutBtn.classList.remove('hidden');
+            dom.navConversationBtn.classList.remove('hidden');
+            dom.navHomeBtn.classList.remove('hidden');
+            dom.navAddBtn.classList.remove('hidden');
             
             // Si le login est affiché, on le cache
             if (!dom.loginSection.classList.contains('hidden') || !dom.signinSection.classList.contains('hidden')) {
@@ -114,6 +180,9 @@ const appController = (() => {
             dom.navUsername.classList.add('hidden');
             dom.navPostBtn.classList.add('hidden');
             dom.navLogoutBtn.classList.add('hidden');
+            dom.navConversationBtn.classList.add('hidden');
+            dom.navHomeBtn.classList.add('hidden');
+            dom.navAddBtn.classList.add('hidden');
             
             dom.navLoginBtn.classList.remove('hidden');
             dom.navSigninBtn.classList.remove('hidden');
@@ -126,29 +195,210 @@ const appController = (() => {
     };
 
     // Déconnexion
-    const handleLogout = () => {
-        localStorage.removeItem('username');
-        localStorage.removeItem('token');
-        showFlash("Vous êtes déconnecté.", false);
-        updateNavUI();
+    const handleLogout = async () => {
+        try {
+            await fetchAPI('/logout', { method: 'POST' });
+        } catch (err) {
+            console.error('Logout error:', err);
+        } finally {
+            localStorage.removeItem('sessionId');
+            localStorage.removeItem('username');
+            showFlash("Vous êtes déconnecté.", false);
+            updateNavUI();
+        }
     };
 
+    // --- Builders de formats html  ---
+
+    // Créé la structure html d'un message 
+    const buildMessageCard = (message) => {
+        const dateStr = new Date(message.date).toLocaleString('fr-FR', {
+            dateStyle: 'medium', timeStyle: 'short'
+        });
+        
+        const card = document.createElement('div');
+        card.className = 'message-card';
+        card.innerHTML = `
+            <div class="msg-header">
+                <span class="msg-author">@${escapeHTML(message.author)}</span>
+                <span class="msg-date">· ${dateStr}</span>
+            </div>
+            <div class="msg-text">${escapeHTML(message.text)}</div>
+        `;
+        return card;
+    }
+
+    // Ajoute un message en fin de liste
+    const appendMessageCard = (message) => {
+        const card = buildMessageCard(message);
+        dom.messagesList.appendChild(card);
+    }
+
+    // Ajoute un message en tête de liste
+    const prependMessageCard = (message) => {
+        const card = buildMessageCard(message);
+        dom.messagesList.prepend(card);
+    }
+
+    // Créé la structure html d'une conversation 
+    const buildConversationCard = (conversation) => {
+        const dateStr = conversation.lastMessageAt 
+            ? new Date(conversation.lastMessageAt).toLocaleString('fr-FR', { 
+                dateStyle: 'medium', timeStyle: 'short' })
+            : '';
+        
+        const username = localStorage.getItem('username');
+        const otherUser = conversation.user1 === username ? conversation.user2 : conversation.user1;
+        const card = document.createElement('div');
+
+        card.className = 'conversation-card';
+        card.innerHTML = `
+            <div class="conv-header">
+                <span class="conv-author">@${escapeHTML(otherUser)}</span>
+                <span class="conv-date">· ${dateStr}</span>
+            </div>
+            <div class="conv-preview">${escapeHTML(conversation.lastMessage) || '<em>Aucun message</em>'}</div>
+        `;
+        
+        card.addEventListener('click', () => openConversation(conversation.id));
+        
+        return card;
+    }; 
 
     // --- Appels AJAX / Fetch ---
 
-    // 1. Inscription (Création compte) : /signin POST
+    // --- Loaders de données GET---
+
+    // 1. <  Récupère les premiers messages et les charge sur la page : /messages GET  >
+    const loadInitialMessages = async () => {
+        dom.messagesList.innerHTML = '<p class="loading">Actualisation des messages...</p>';
+        try {
+            const {res, data} = await fetchAPI(`/messages?limit=${messageState.limit}&offset=0`);
+            
+            if (!res.ok) throw new Error("Erreur serveur API");
+            
+            messageState.messages = data;
+            messageState.offset = data.length;
+            messageState.latestTimestamp = data.length > 0 ? data[0].date : null;
+            messageState.endOfpage = data.length != messageState.limit;
+            
+            dom.messagesList.innerHTML = '';
+            if (data.length === 0) {
+                dom.messagesList.innerHTML = '<p style="text-align: center; color: #657786; padding: 20px;">Aucun message à afficher pour l\'instant.</p>';
+                return;
+            }
+            data.forEach(msg => appendMessageCard(msg));
+        } catch (err) {
+            dom.messagesList.innerHTML = '<p class="flash error">Impossible de charger le fil d\'actualité.</p>';
+        }
+    }
+
+    // 2. <  // Récupère tout les messages récents : /messages GET  > 
+    const loadNewMessages = async () => {
+        try {
+            const {res, data} = await fetchAPI(`/messages?loadAfterLatest=${messageState.latestTimestamp}`);
+            
+            if(!res.ok) throw new Error("Erreur serveur API");
+            
+            if (data.length === 0) return;
+
+            messageState.messages = [...data, ...messageState.messages];
+            messageState.offset += data.length ;
+            messageState.latestTimestamp = data[0].date;
+            
+            data.forEach(msg => prependMessageCard(msg));
+        } catch (err) {
+            console.error('Échec de réucpération des nouveaux messgaes:',err);
+        }
+    };
+
+    // 3. <  Récupère les messages plus anciens basé sur un offset : /messages GET  >
+    const loadOldMessages = async () => {
+        if (messageState.isLoading || messageState.endOfpage) return;
+        try {
+            messageState.isLoading = true;
+            
+            const {res, data} = await fetchAPI(`/messages?limit=${messageState.limit}&offset=${messageState.offset}`);
+            if(!res.ok) throw new Error("Erreur serveur API");
+            
+            if (data.length === 0) return;
+
+            messageState.messages = [...messageState.messages, ...data];
+            messageState.offset += data.length ;
+            messageState.endOfpage = data.length != messageState.limit;
+            
+            data.forEach(msg => appendMessageCard(msg));
+            
+            messageState.isLoading = false;
+        } catch (err) {
+            dom.messagesList.innerHTML = '<p class="flash error">Impossible de charger le fil d\'actualité.</p>';
+        } finally {
+            messageState.isLoading = false;
+        }
+    };
+
+    // 4. <  Récupère les conversation de l'utilisateur : /conversations GET >
+    const loadConversations = async () => {
+        dom.conversationList.innerHTML = '<p class="loading">Actualisation des conversations...</p>';
+        try {
+            const {res, data} = await fetchAPI(`/conversations`, {
+                method: 'GET',
+            });
+            
+            if (!res.ok) throw new Error("Erreur serveur API");
+
+            dom.conversationList.innerHTML = '';
+            if (data.length === 0) {
+                dom.conversationList.innerHTML = '<p style="text-align: center; color: #657786; padding: 20px;">Aucune conversation active.</p>';
+                return;
+            }
+            
+            data.forEach( conv => {
+                dom.conversationList.appendChild(buildConversationCard(conv));
+            });
+        } catch (err) {
+            dom.conversationList.innerHTML = '<p class="flash error">Impossible de charger les conversations.</p>';
+        }
+    }
+
+    // 5. <  Récupère les messages entre deux utilisateurs : /messages/private POST  >
+    const loadPvMessages = async (conversationId) => {
+        dom.privateList.innerHTML = '<p class="loading">Actualisation des messages...</p>';
+        try {
+            const {res, data} = await fetchAPI(`/messages/private?conversationId=${conversationId}`, {
+                method: 'GET',
+            });
+            
+            if (!res.ok) throw new Error("Erreur serveur API");
+
+            dom.privateList.innerHTML = '';
+            if (data.length === 0) {
+                dom.privateList.innerHTML = '<p style="text-align: center; color: #657786; padding: 20px;">Aucun message.</p>';
+                return;
+            }
+
+            data.forEach( conv => {
+                dom.privateList.appendChild(buildMessageCard(conv));
+            });
+        } catch (err) {
+            dom.privateList.innerHTML = '<p class="flash error">Impossible de charger la conversation.</p>';
+        }
+    };
+
+    // --- Formulaires POST ---
+
+    // 1. <  Inscription (Création compte) : /signin POST  >
     dom.signinForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const username = dom.signinForm.signinUsername.value.trim();
         const password = dom.signinForm.signinPassword.value.trim();
+        const passwordConfirmation = dom.signinForm.signinPasswordConfirmation.value.trim();
 
         try {
-            const res = await fetch('/signin', {
+            const {res, data} = await fetchAPI('/signin', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, password, passwordConfirmation })
             });
-            const data = await res.json();
             
             if (res.ok) {
                 hideForms();
@@ -162,24 +412,22 @@ const appController = (() => {
         }
     });
 
-    // 2. Connexion : /login POST
+    // 2. <  Connexion : /login POST  > 
     dom.loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const username = dom.loginForm.loginUsername.value.trim();
         const password = dom.loginForm.loginPassword.value.trim();
 
         try {
-            const res = await fetch('/login', {
+            const {res, data} = await fetchAPI('/login',{
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             });
-            const data = await res.json();
 
             if (res.ok) {
                 // Succès : Sauvegarde dans localStorage !!
+                localStorage.setItem('sessionId', data.sessionId);
                 localStorage.setItem('username', username);
-                localStorage.setItem('token', data.token);
                 
                 hideForms();
                 updateNavUI();
@@ -192,30 +440,21 @@ const appController = (() => {
         }
     });
 
-    // 3. Publier Message : /post POST
+    // 3. <  Publier Message : /post POST  >
     dom.composeForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = dom.composeForm.messageText.value.trim();
-        const token = localStorage.getItem('token');
-
-        if (!token) {
-            showFlash("Vous devez être connecté pour publier.", true);
-            handleLogout();
-            return;
-        }
-
+        
         try {
-            const res = await fetch('/post', {
+            const {res, data} = await fetchAPI('/post', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token, text })
+                body: JSON.stringify({ text })
             });
-            const data = await res.json();
 
             if (res.ok) {
                 hideForms();
                 showFlash("Votre message a été publié !", false);
-                fetchMessages();
+                loadInitialMessages();
             } else {
                 showFlash(data.error || "Erreur de publication. Veuillez vous reconnecter.", true);
                 if (res.status === 401) {
@@ -226,59 +465,88 @@ const appController = (() => {
             showFlash("Impossible de contacter le serveur.", true);
         }
     });
-
-    // 4. Flux des messages : /messages GET
-    const fetchMessages = async () => {
-        dom.messagesList.innerHTML = '<p class="loading">Actualisation des messages...</p>';
+     
+    // 4. <  Commencer à communiquer avec un utlisateur : /conversations POST >
+    dom.addForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const recipient = dom.addForm.addUser.value.trim();
         try {
-            const res = await fetch('/messages');
-            if (!res.ok) throw new Error("Erreur serveur API");
-            const messages = await res.json();
-            renderMessages(messages);
-        } catch (err) {
-            dom.messagesList.innerHTML = '<p class="flash error">Impossible de charger le fil d\'actualité.</p>';
-        }
-    };
-
-    const renderMessages = (messages) => {
-        dom.messagesList.innerHTML = '';
-        if (messages.length === 0) {
-            dom.messagesList.innerHTML = '<p style="text-align: center; color: #657786; padding: 20px;">Aucun message à afficher pour l\'instant.</p>';
-            return;
-        }
-
-        messages.forEach(msg => {
-            const dateStr = new Date(msg.date).toLocaleString('fr-FR', {
-                dateStyle: 'medium', timeStyle: 'short'
+            const {res, data} = await fetchAPI('/conversations', {
+                method: 'POST',
+                body: JSON.stringify({ recipient })
             });
-            
-            const card = document.createElement('div');
-            card.className = 'message-card';
-            card.innerHTML = `
-                <div class="msg-header">
-                    <span class="msg-author">@${escapeHTML(msg.author)}</span>
-                    <span class="msg-date">· ${dateStr}</span>
-                </div>
-                <div class="msg-text">${escapeHTML(msg.text)}</div>
-            `;
-            dom.messagesList.appendChild(card);
-        });
-    };
 
+            if (res.ok) {
+                hideForms();
+                showFlash("Ajout réussi.", false);
+                loadConversations();
+            } else {
+                showFlash(data.error || "Erreur lors de l'envoi.", true);
+            }
+        } catch ( err ){
+            showFlash("Impossible de contacter le serveur.", true);
+        }
+        
+    });
+
+    // 5. <  Envoyer un message privé : /messages/private POST  >
+    dom.privateForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const text = dom.privateForm.privateText.value.trim();
+        const conversationId = conversationState.currentConversationId;
+
+        try {
+            const {res, data} = await fetchAPI('/messages/private', {
+                method: 'POST',
+                body: JSON.stringify({ conversationId, text })
+            });
+        
+            if (res.ok) {
+                hideForms();
+                updateNavUI();
+                loadPvMessages(conversationId); // reload the thread
+            } else {
+                showFlash(data.error || "Erreur lors de l'envoi.", true);
+            }
+        } catch (err) {
+            showFlash("Impossible de contacter le serveur.", true);
+        }
+    });
+
+    const openConversation = (conversationId) => {
+        conversationState.currentConversationId = conversationId;
+        showPage(dom.privateView);
+        loadPvMessages(conversationId);
+    } 
 
     // --- Initialisation ---
     const init = () => {
-        // Event listeners Nav Menu
+        // Nav Listeners
         dom.navLoginBtn.addEventListener('click', () => showForm('loginSection'));
         dom.navSigninBtn.addEventListener('click', () => showForm('signinSection'));
         dom.navPostBtn.addEventListener('click', () => showForm('postSection'));
+        dom.navAddBtn.addEventListener('click', () => showForm('addSection'));
+        dom.navPvmBtn.addEventListener('click', () => showForm('privateSection'));
         dom.navLogoutBtn.addEventListener('click', handleLogout);
+        dom.navConversationBtn.addEventListener('click', () => {
+            showPage(dom.conversationView)
+            loadConversations();    
+        });
+        dom.navHomeBtn.addEventListener('click', () => showPage(dom.feedView));
         
-        dom.refreshBtn.addEventListener('click', fetchMessages);
-        
+        // Refresh Listeners
+        dom.refreshBtn.addEventListener('click', loadInitialMessages);
+        dom.refreshConversationBtn.addEventListener('click', loadConversations);
+        dom.refreshPvmBtn.addEventListener('click', () => loadPvMessages(conversationState.currentConversationId));
+        window.addEventListener('scroll', () => {
+            const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 100;
+            if (nearBottom) loadOldMessages();
+        });
+
         // Premier setup
+        loadInitialMessages();
         updateNavUI();
-        fetchMessages();
+        setInterval(loadNewMessages, 5000);
     };
 
     // Expose fonctions si besoin au global (par exemple pour onClick="appController.hideForms()")
