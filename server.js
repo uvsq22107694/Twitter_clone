@@ -6,12 +6,17 @@ const path = require('path');
 const fs = require('fs');
 const argon2 = require('argon2');
 const crypto = require('crypto');
+const z = require('zod');
+const sc = require('./schemas');
+const { error } = require('console');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json());
+app.use(cors()); 
+app.use(express.json({limit: '1kb'}));
+// Limiter la taille des requêtes
+app.use(express.urlencoded({limit: '1kb',extended: true , parameterLimit: 100}))
 
 // Servir les fichiers statiques depuis pub/
 app.use('/pub', express.static(path.join(__dirname, 'pub')));
@@ -97,6 +102,20 @@ const authenticate =  (req, res, next) => {
     next();
 }
 
+// Gère la verification du type et de la taille des variables en entrée.
+function verifyParameters(schema, field) {
+    return (req, res, next) => {
+        const result = schema.safeParse(req[field]);
+        if (!result.success) {
+            const err = result.error.issues[0];
+            return res.status(400).json({ error : `${err.path} est ${err.message}`});            
+        } else {
+            req[field] = result.data;
+        }   
+        next();
+    };
+}
+
 // --- API JSON ---
 
 app.post('/logout', authenticate, (req, res) => {
@@ -105,12 +124,9 @@ app.post('/logout', authenticate, (req, res) => {
 });
 
 // POST /signin : Créer un nouvel utilisateur
-app.post('/signin', async (req, res) => {
+app.post('/signin', verifyParameters(sc.signinSchema, 'body'), async (req, res) => {
     // Vérification des identifiants
     const { username, password, passwordConfirmation } = req.body;
-    if (!username || !password || !passwordConfirmation) {
-        return res.status(400).json({ error: "Username et password requis." });
-    }
     if (password != passwordConfirmation) {
         return res.status(422).json({ error: "Les mots de passe ne correspondent pas." });
     }
@@ -131,11 +147,8 @@ app.post('/signin', async (req, res) => {
 });
 
 // POST /login : Vérifier les identifiants utilisateur
-app.post('/login', async (req, res) => {
+app.post('/login', verifyParameters(sc.loginSchema, 'body'), async (req, res) => {
     const { username, password } = req.body;
-    if (!username || !password) {
-        return res.status(400).json({ error: "Username et password requis." });
-    }
 
     // Recherche de l'utilisateur d'après ses identifiants
     const sql = "SELECT * FROM users WHERE username = ?";
@@ -163,17 +176,13 @@ app.post('/login', async (req, res) => {
 });
 
 // GET /messages : Obtenir la liste de tous les messages (ordre chronologique)
-app.get('/messages', (req, res) => {
-    const limit = parseInt(req.query.limit) || 10;
-    const offset = parseInt(req.query.offset) || 0;
-    const loadAfterLatest = req.query.loadAfterLatest || null; 
-    
+app.get('/messages', verifyParameters(sc.getMessageSchema, 'query'), (req, res) => {
+    const {limit, offset, loadAfterLatest} = req.query;
     // Récupérer les messages les plus récents
     if (loadAfterLatest) {
         const sql = "SELECT * FROM messages WHERE date > ? ORDER BY date DESC";    
         db.all(sql, [loadAfterLatest], (err, rows) => {
-        if (err) return res.status(500).json({ error: "Erreur interne" });
-        
+        if (err) return res.status(500).json({ error: "Erreur interne" });         
             res.json(rows);
         });
     } else { // Récupérer les premier message en partant d'un offset
@@ -186,13 +195,9 @@ app.get('/messages', (req, res) => {
 });
 
 // POST /post : Publier un nouveau message
-app.post('/post', authenticate, (req, res) => {
+app.post('/post', authenticate, verifyParameters(sc.postMessageSchema, 'body'), (req, res) => {
     const username  = req.user.username;
     const { text } = req.body;
-    
-    if (!text) {
-        return res.status(400).json({ error: "Le message ne peut pas être vide." });
-    }
 
     // Insérer le messgae dans la base de données
     const insertSql = "INSERT INTO messages (author, text) VALUES (?, ?)";
@@ -223,13 +228,11 @@ app.get('/conversations', authenticate, (req, res) => {
 });
 
 // POST /conversations : Commencer une conversation avec un utilisateur 
-app.post('/conversations', authenticate, (req, res) => {
+app.post('/conversations', authenticate, verifyParameters(sc.consversationSchema, 'body'), (req, res) => {
     const username = req.user.username;
     const { recipient } = req.body;
 
-    if (!recipient) {
-        return res.status(400).json({ error: "Destinataire requis." });
-    } else if (recipient === username) {
+    if (recipient === username) {
         return res.status(400).json({ error: "Vous ne pouvez pas vous écrire à vous-même." });
     }
 
@@ -261,12 +264,12 @@ app.post('/conversations', authenticate, (req, res) => {
 });
 
 // GET /messages/private : Obtenir la liste des messages pour une conversation donnée
-app.get('/messages/private', authenticate, (req, res) => {
+app.get('/messages/private', authenticate, verifyParameters(sc.getPrivateMessageSchema, 'query'), (req, res) => {
         const username = req.user.username;
         const { conversationId } = req.query;
 
     if (!conversationId) {
-        return res.status(400).json({ error: "conversationId requis." });
+        return res.status(400).json({ error: "Vous n'avez pas accès à ça :-P" });
     }
 
     // Vérifier si l'utilisateur à participé à la conversation
@@ -286,15 +289,9 @@ app.get('/messages/private', authenticate, (req, res) => {
 });
 
 // POST /messages/private : Envoyer un message privé
-app.post('/messages/private', authenticate, (req, res) => {
+app.post('/messages/private', authenticate, verifyParameters(sc.postPrivateMessageSchema, 'body'), (req, res) => {
     const username = req.user.username;
     const { conversationId, text } = req.body;
-
-    if (!conversationId) {
-        return res.status(400).json({ error: "conversationId requis." });
-    } else if (!text) {
-        return res.status(400).json({ error: "Le message doit avoir un contenu." });
-    }
 
     // Vérifier si l'utilisateur à participé à la conversation
     const verifySql = `SELECT * FROM conversations WHERE id = ? AND (user1 = ? OR user2 = ?)` ;

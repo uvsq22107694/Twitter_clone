@@ -109,6 +109,8 @@ const appController = (() => {
     
     const sectionElements =  [dom.loginSection, dom.signinSection, dom.postSection, dom.addSection, dom.privateSection];
     const formElements =  [dom.loginForm, dom.signinForm, dom.composeForm, dom.addForm, dom.privateForm];
+    const pages = [dom.feedView, dom.conversationView, dom.privateView];
+
     // Masque tous les formulaires
     const hideForms = () => {
         sectionElements.forEach( e => e.classList.add('hidden'));
@@ -125,15 +127,13 @@ const appController = (() => {
         if (firstInput) firstInput.focus();
     };
 
-    const pages = [dom.feedView, dom.conversationView, dom.privateView];
-
     // Affiche une page spécifique
-    const showPage = (page) => {
+    const showPage = (pageId) => {
         hideForms();
         pages.forEach(p => {
             p.classList.add('hidden');
         });
-        page.classList.remove('hidden');
+        document.getElementById(pageId).classList.remove('hidden');
     }
 
 
@@ -149,11 +149,10 @@ const appController = (() => {
     }
 
     // --- Logique d'authentification UI ---
-    
+
     // Met à jour la Nav bar selon l'état actuel de LocalStorage
     const updateNavUI = () => {
         const sessionId = localStorage.getItem('sessionId');
-        // Risque potentiel
         const username = localStorage.getItem('username');
         const isLoggedIn = !!sessionId;
 
@@ -165,11 +164,11 @@ const appController = (() => {
             dom.navUsername.textContent = `@${username}`;
             dom.navUsername.classList.remove('hidden');
             
-            dom.navPostBtn.classList.remove('hidden');
             dom.navLogoutBtn.classList.remove('hidden');
             dom.navConversationBtn.classList.remove('hidden');
             dom.navHomeBtn.classList.remove('hidden');
-            dom.navAddBtn.classList.remove('hidden');
+
+            dom.navPostBtn.classList.remove('hidden');
             
             // Si le login est affiché, on le cache
             if (!dom.loginSection.classList.contains('hidden') || !dom.signinSection.classList.contains('hidden')) {
@@ -178,11 +177,12 @@ const appController = (() => {
         } else {
             // Visiteur
             dom.navUsername.classList.add('hidden');
-            dom.navPostBtn.classList.add('hidden');
+            
             dom.navLogoutBtn.classList.add('hidden');
             dom.navConversationBtn.classList.add('hidden');
             dom.navHomeBtn.classList.add('hidden');
-            dom.navAddBtn.classList.add('hidden');
+
+            dom.navPostBtn.classList.add('hidden');
             
             dom.navLoginBtn.classList.remove('hidden');
             dom.navSigninBtn.classList.remove('hidden');
@@ -204,6 +204,7 @@ const appController = (() => {
             localStorage.removeItem('sessionId');
             localStorage.removeItem('username');
             showFlash("Vous êtes déconnecté.", false);
+            showPage('feedView');
             updateNavUI();
         }
     };
@@ -251,13 +252,15 @@ const appController = (() => {
         const otherUser = conversation.user1 === username ? conversation.user2 : conversation.user1;
         const card = document.createElement('div');
 
-        card.className = 'conversation-card';
+        card.className = 'conv-card';
         card.innerHTML = `
             <div class="conv-header">
                 <span class="conv-author">@${escapeHTML(otherUser)}</span>
-                <span class="conv-date">· ${dateStr}</span>
+                <span class="conv-date">· ${dateStr}</span><br>
             </div>
-            <div class="conv-preview">${escapeHTML(conversation.lastMessage) || '<em>Aucun message</em>'}</div>
+            <div class="conv-text conv-preview">${escapeHTML(conversation.lastMessage) || '<em>Aucun message</em>'}</div>
+            
+            
         `;
         
         card.addEventListener('click', () => openConversation(conversation.id));
@@ -503,7 +506,6 @@ const appController = (() => {
         
             if (res.ok) {
                 hideForms();
-                updateNavUI();
                 loadPvMessages(conversationId); // reload the thread
             } else {
                 showFlash(data.error || "Erreur lors de l'envoi.", true);
@@ -515,7 +517,7 @@ const appController = (() => {
 
     const openConversation = (conversationId) => {
         conversationState.currentConversationId = conversationId;
-        showPage(dom.privateView);
+        showPage('privateView');
         loadPvMessages(conversationId);
     } 
 
@@ -529,10 +531,10 @@ const appController = (() => {
         dom.navPvmBtn.addEventListener('click', () => showForm('privateSection'));
         dom.navLogoutBtn.addEventListener('click', handleLogout);
         dom.navConversationBtn.addEventListener('click', () => {
-            showPage(dom.conversationView)
+            showPage('conversationView');
             loadConversations();    
         });
-        dom.navHomeBtn.addEventListener('click', () => showPage(dom.feedView));
+        dom.navHomeBtn.addEventListener('click', () => showPage('feedView'));
         
         // Refresh Listeners
         dom.refreshBtn.addEventListener('click', loadInitialMessages);

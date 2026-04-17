@@ -151,11 +151,14 @@ form .btn-cancel { background: transparent; color: var(--muted-color); border: n
 form .btn-cancel:hover { text-decoration: underline; background: transparent; }
 
 /* Feed Section */
-#feedView {
+#feedView,
+#conversationView,
+#privateView {
     padding: 20px;
 }
 
 .feed-header {
+    min-height: 40px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -163,7 +166,17 @@ form .btn-cancel:hover { text-decoration: underline; background: transparent; }
     padding-bottom: 10px;
     margin-bottom: 10px;
 }
-.feed-header h2 { font-size: 18px; }
+
+.feed-header h2 {
+    font-size: 18px;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.feed-header .btn-icon {
+    margin-left: auto;
+}
 
 .btn-icon { background: none; border: none; cursor: pointer; font-size: 18px; transition: transform 0.2s; }
 .btn-icon:hover { transform: scale(1.1); }
@@ -172,10 +185,22 @@ form .btn-cancel:hover { text-decoration: underline; background: transparent; }
 .message-card {
     padding: 15px 0;
     border-bottom: 1px solid var(--border-color);
+    overflow: hidden;
 }
 .msg-header { display: flex; align-items: baseline; margin-bottom: 5px; gap: 8px; }
 .msg-author { font-weight: bold; color: var(--text-color); font-size: 15px; }
 .msg-date { color: var(--muted-color); font-size: 13px; }
 .msg-text { font-size: 15px; white-space: pre-wrap; word-break: break-word; line-height: 1.4; margin-top: 4px;}
+
+.conv-card {
+    padding: 15px 0;
+    border-bottom: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.conv-header { display: flex; align-items: baseline; margin-bottom: 5px; gap: 8px; cursor: pointer;}
+.conv-author { font-weight: bold; color: var(--text-color); font-size: 15px; }
+.conv-date { color: var(--muted-color); font-size: 13px; }
+.conv-text { font-size: 15px; white-space: pre-wrap; word-break: break-word; line-height: 1.4; margin-top: 4px; cursor: pointer;}
 
 .loading { text-align: center; color: var(--muted-color); padding: 20px; }
